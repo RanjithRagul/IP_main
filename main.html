@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>IPTV — Alphabet Fit Fixed</title>
+
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+<style>
+:root{
+  --bg:#0b0c0f; --muted:#9aa3ad; --accent:#ff9800; --alpha-gap:6px;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial;color:#e6f7ff;background:var(--bg);-webkit-font-smoothing:antialiased}
+header{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.03);position:sticky;top:0;background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);backdrop-filter: blur(6px);z-index:60}
+.logo{width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,#003b4d,#00677f);display:flex;align-items:center;justify-content:center}
+.searchWrap{margin-left:auto;display:flex;gap:8px;align-items:center}
+input.search{padding:10px 12px;border-radius:12px;border:2px solid rgba(255,140,0,0.38);background:rgba(255,255,255,0.02);color:#e6f7ff;min-width:200px}
+.goBtn{padding:8px 10px;border-radius:10px;border:none;background:linear-gradient(180deg, rgba(255,140,0,0.12), rgba(255,140,0,0.04));color:#fff;cursor:pointer}
+.count{font-size:13px;color:var(--muted);margin-left:8px}
+main{padding:14px;max-width:1200px;margin:0 auto}
+.langSection{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border-radius:12px;padding:12px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.02)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.tile{background:linear-gradient(180deg, rgba(0,0,0,0.35), rgba(255,255,255,0.01));border-radius:10px;padding:10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:8px;border:1px solid rgba(255,255,255,0.02)}
+.tile img{width:100%;height:84px;object-fit:cover;border-radius:8px;background:#000}
+.name{font-size:13px;color:#e6f7ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100%}
+.meta{font-size:11px;color:var(--muted)}
+#searchResults{margin-bottom:12px;display:none}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;padding:10px;z-index:1200}
+.player-wrap{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#000}
+video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
+.closeBtn{position:fixed;right:18px;top:18px;background:rgba(0,0,0,0.45);border:1px solid rgba(255,255,255,0.08);color:#fff;padding:10px 12px;border-radius:12px;cursor:pointer;font-size:20px;z-index:1210}
+
+/* Alphabet bar - JS will size buttons to fit viewport exactly */
+.alphaBar{
+  position:fixed;
+  right:8px;
+  top:0; /* we'll position with JS using header height */
+  width:56px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap: var(--alpha-gap);
+  z-index:110;
+  padding:6px;
+  background:transparent;
+  user-select:none;
+  -webkit-user-select:none;
+  overflow:hidden; /* no scroll; JS ensures fit */
+}
+.alphaBtn{
+  display:flex;align-items:center;justify-content:center;width:100%;border-radius:8px;background:rgba(255,255,255,0.02);color:var(--muted);cursor:pointer;border:1px solid rgba(255,255,255,0.02);padding:0;font-weight:700;line-height:1;box-sizing:border-box;
+}
+.alphaBtn.active{background:rgba(93,209,255,0.14);color:#e6f7ff;box-shadow:0 8px 18px rgba(0,0,0,0.45)}
+.progressBar{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:rgba(0,0,0,0.65);padding:6px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);color:var(--muted);font-size:13px;z-index:1300}
+@media (max-width:520px){ .alphaBar{ width:44px } input.search{min-width:120px} }
+</style>
+</head>
+<body>
+
+<header id="appHeader">
+  <div class="logo">IP</div>
+  <div style="margin-left:8px">
+    <div style="font-weight:700">IPTV — Languages</div>
+    <div style="font-size:13px;color:var(--muted)">Search or tap a letter. Click tile to play (fullscreen).</div>
+  </div>
+
+  <div class="searchWrap" style="margin-left:auto">
+    <input id="search" class="search" placeholder="Search channels (case & space insensitive)" />
+    <button id="btnGo" class="goBtn">Go</button>
+    <div class="count" id="count">…</div>
+  </div>
+</header>
+
+<main id="mainContent">
+  <section id="searchResults" class="langSection">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h2 style="margin:0">Search results</h2>
+      <div id="searchCount" class="meta"></div>
+    </div>
+    <div id="searchGrid" class="grid"></div>
+  </section>
+  <!-- languages appended here -->
+</main>
+
+<div id="alphaBar" class="alphaBar" aria-hidden="false"></div>
+<div id="progress" class="progressBar" style="display:none">Loading...</div>
+<div id="modalRoot" style="display:none"></div>
+
+<script>
+/* ---------- same working chunked app + robust alphabet fit ---------- */
+const API_ROOT = 'https://iptv-org.github.io/api';
+const CHANNELS_URL = API_ROOT + '/channels.json';
+const STREAMS_URL  = API_ROOT + '/streams.json';
+
+const headerEl = document.getElementById('appHeader');
+const main = document.getElementById('mainContent');
+const modalRoot = document.getElementById('modalRoot');
+const searchInput = document.getElementById('search');
+const btnGo = document.getElementById('btnGo');
+const countEl = document.getElementById('count');
+const searchResults = document.getElementById('searchResults');
+const searchGrid = document.getElementById('searchGrid');
+const searchCount = document.getElementById('searchCount');
+const alphaBar = document.getElementById('alphaBar');
+const progress = document.getElementById('progress');
+
+let channels = []; window.channels = channels;
+let languageMap = {}; let langKeys = [];
+let streams = []; let streamsLoadedFlag = false; let streamsLoadPromise = null;
+let activeAlpha = null;
+
+/* helpers */
+const debounce = (fn, ms=180)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
+function updateCount(){ countEl.textContent = document.querySelectorAll('.tile').length + ' channels'; }
+function escapeHtml(s){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+
+/* first meaningful char (skip punctuation) */
+function firstMeaningfulChar(name){
+  if(!name) return '';
+  const s = name.trim();
+  if(!s) return '';
+  for (let i=0;i<s.length;){
+    const cp = s.codePointAt(i);
+    const ch = String.fromCodePoint(cp);
+    if(!/[\s\.\,\:\;\!\?\(\)\[\]\{\}"'`<>\/\\@#\$%\^&\*\+=~–—|]/.test(ch)) return ch;
+    i += cp > 0xFFFF ? 2 : 1;
+  }
+  return '';
+}
+
+/* load channels */
+async function loadChannels(){
+  const r = await fetch(CHANNELS_URL);
+  if(!r.ok) throw new Error('channels.json load failed ' + r.status);
+  channels = await r.json(); window.channels = channels;
+  languageMap = {}; channels.forEach(c=>{
+    const langs = Array.isArray(c.languages) && c.languages.length ? c.languages : ['unknown'];
+    langs.forEach(l=>{
+      const key = l || 'unknown';
+      languageMap[key] = languageMap[key] || [];
+      languageMap[key].push(c);
+    });
+  });
+  langKeys = Object.keys(languageMap).sort((a,b)=>{
+    if(a==='unknown') return 1;
+    if(b==='unknown') return -1;
+    return a.localeCompare(b);
+  });
+}
+
+/* make tile */
+function makeTile(ch){
+  try {
+    const tile = document.createElement('div'); tile.className='tile'; tile.tabIndex=0; tile.dataset.chanid=ch.id||'';
+    const img = document.createElement('img'); img.alt=ch.name||ch.id||''; img.src = ch.logo || ch.logo_128 || '';
+    const nm = document.createElement('div'); nm.className='name'; nm.textContent = ch.name || ch.id || 'Unknown';
+    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = ch.country || (Array.isArray(ch.languages)?ch.languages.join(', '):'');
+    tile.appendChild(img); tile.appendChild(nm); tile.appendChild(meta);
+    tile.addEventListener('click', ()=> openPlayerForChannel(ch.id));
+    tile.addEventListener('keypress', e=> { if(e.key==='Enter'||e.key===' ') openPlayerForChannel(ch.id); });
+    return tile;
+  } catch(e){ console.error('makeTile error', e, ch); const t=document.createElement('div'); t.className='tile'; t.textContent=ch && ch.name?ch.name:'error'; return t;}
+}
+
+/* chunked rendering */
+const CHUNK_SIZE=50; let _renderCancel=false;
+function cancelRender(){ _renderCancel=true; }
+async function renderMatchesInChunks(matches, gridEl, progressCb){
+  _renderCancel=false; gridEl.innerHTML=''; searchResults.style.display='block';
+  for(let i=0;i<matches.length;i+=CHUNK_SIZE){
+    if(_renderCancel) break;
+    const slice = matches.slice(i, i+CHUNK_SIZE);
+    for(const ch of slice) try{ gridEl.appendChild(makeTile(ch)); } catch(e){ console.error(e, ch); }
+    if(typeof progressCb==='function') progressCb(Math.min(i+CHUNK_SIZE, matches.length), matches.length);
+    await new Promise(r=>setTimeout(r,10));
+  }
+  void gridEl.offsetHeight;
+  if(typeof progressCb==='function') progressCb(matches.length, matches.length);
+  return !(_renderCancel);
+}
+
+/* progressive languages rendering */
+const INITIAL_PAGE = 24, RENDER_BATCH_MS = 12;
+function createLanguageSection(lang,list){
+  const s=document.createElement('section'); s.className='langSection'; s.dataset.lang=lang;
+  const head=document.createElement('div'); head.className='langHead';
+  const h=document.createElement('h2'); h.textContent=(lang||'unknown').toUpperCase() + ' (' + list.length + ')';
+  const small=document.createElement('div'); small.className='meta'; small.textContent='Channels: ' + list.length;
+  head.appendChild(h); head.appendChild(small);
+  const grid=document.createElement('div'); grid.className='grid'; grid._items=list; grid._renderIndex=0; grid._renderLimit=INITIAL_PAGE;
+  s.appendChild(head); s.appendChild(grid);
+  const loadBtn=document.createElement('button'); loadBtn.className='loadMore'; loadBtn.textContent='Load more'; loadBtn.style.display='none';
+  loadBtn.addEventListener('click', ()=>{ grid._renderLimit += INITIAL_PAGE; renderItemsForGrid(grid); });
+  s.appendChild(loadBtn); grid._loadBtn = loadBtn;
+  return s;
+}
+function renderItemsForGrid(grid){
+  const list=grid._items||[]; const limit=Math.min(grid._renderLimit, list.length);
+  while(grid._renderIndex<limit){
+    const ch=list[grid._renderIndex++]; try{ grid.appendChild(makeTile(ch)); } catch(e){ console.error(e); }
+    if(grid._renderIndex%6===0){ setTimeout(()=>renderItemsForGrid(grid), RENDER_BATCH_MS); return; }
+  }
+  grid._loadBtn.style.display = (grid._renderIndex < list.length) ? 'block' : 'none';
+}
+function progressiveRenderLanguages(){ let i=0; function step(){ if(i>=langKeys.length) return; const lang=langKeys[i++], list=languageMap[lang]; main.appendChild(createLanguageSection(lang,list)); setTimeout(()=>{ const grid=main.querySelector(`section[data-lang="${CSS.escape(lang)}"] .grid`); if(grid) renderItemsForGrid(grid); },8); requestAnimationFrame(step);} step();}
+
+/* search (chunked) */
+function resetToAll(){ cancelRender(); searchInput.value=''; activeAlpha=null; highlightAlpha(null); searchResults.style.display='none'; document.querySelectorAll('.langSection').forEach(s=>s.style.display=''); updateCount(); }
+async function doSearch(q){
+  cancelRender();
+  const qn=(q||'').toString().toLowerCase().replace(/\s+/g,'');
+  if(!qn){ if(activeAlpha) await doAlphaFilter(activeAlpha); else resetToAll(); return; }
+  activeAlpha=null; highlightAlpha(null); document.querySelectorAll('.langSection').forEach(s=>s.style.display='none');
+  const matches = channels.filter(c => (c.name||'').toString().toLowerCase().replace(/\s+/g,'').includes(qn));
+  searchCount.textContent = matches.length + ' matches';
+  progress.style.display = 'block'; progress.textContent = `Loading 0 / ${matches.length}`;
+  await renderMatchesInChunks(matches, searchGrid, (done,total)=> { progress.textContent = `Loading ${done} / ${total}`; });
+  progress.style.display = 'none'; updateCount();
+}
+
+/* ---------- robust alphabet fit using viewport & header height ---------- */
+/* Requirements:
+   - no vertical scrolling in alphaBar
+   - All buttons (All, N, A..Z, #) must be visible
+   - adapt to header height, device rotations, different screen sizes
+*/
+const LETTERS = Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ');
+
+function buildAlphaBar(){
+  alphaBar.innerHTML = '';
+  // All
+  const allBtn = document.createElement('div'); allBtn.className='alphaBtn'; allBtn.textContent='All';
+  allBtn.title='Show all'; allBtn.addEventListener('click', ()=> resetToAll());
+  alphaBar.appendChild(allBtn);
+  // N for numbers
+  const nBtn = document.createElement('div'); nBtn.className='alphaBtn'; nBtn.textContent='N'; nBtn.title='Numbers (0-9)';
+  nBtn.addEventListener('click', ()=> { activeAlpha='N'; highlightAlpha('N'); doAlphaFilter('N'); });
+  alphaBar.appendChild(nBtn);
+  // A..Z
+  LETTERS.forEach(ch=>{ const b=document.createElement('div'); b.className='alphaBtn'; b.textContent=ch; b.title='Starts with '+ch; b.addEventListener('click', ()=> { activeAlpha = ch; highlightAlpha(ch); doAlphaFilter(ch); }); alphaBar.appendChild(b); });
+  // #
+  const hash = document.createElement('div'); hash.className='alphaBtn'; hash.textContent='#'; hash.title='Other';
+  hash.addEventListener('click', ()=> { activeAlpha='#'; highlightAlpha('#'); doAlphaFilter('#'); });
+  alphaBar.appendChild(hash);
+
+  fitAlphaButtonsViewport();
+}
+
+/* highlight */
+function highlightAlpha(letter){
+  alphaBar.querySelectorAll('.alphaBtn').forEach(n=>n.classList.remove('active'));
+  if(!letter) return;
+  const node = Array.from(alphaBar.children).find(c => c.textContent === letter);
+  if(node) node.classList.add('active');
+}
+
+/* Fit algorithm:
+   - Measure usable vertical space = viewport height - header height - safety margins
+   - Compute buttonHeight = floor((usable - totalGaps) / count)
+   - Enforce absolute min font size and min button height (small but readable)
+   - Apply sizes; force overflow:hidden to avoid scroll
+*/
+function fitAlphaButtonsViewport(){
+  const buttons = Array.from(alphaBar.querySelectorAll('.alphaBtn'));
+  if(!buttons.length) return;
+
+  const viewportH = window.innerHeight || document.documentElement.clientHeight;
+  const headerRect = headerEl.getBoundingClientRect();
+  const headerBottom = headerRect.bottom || headerEl.offsetHeight;
+  // safety margins (top and bottom)
+  const topMargin = 8; const bottomMargin = 8;
+  // compute usable vertical area for alphabet bar
+  const usable = Math.max(24, viewportH - headerBottom - bottomMargin - topMargin);
+  // total gaps between buttons
+  const gap = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--alpha-gap')) || 6;
+  const count = buttons.length;
+  const totalGaps = gap * (count - 1);
+  // compute ideal height per button
+  let idealH = Math.floor((usable - totalGaps) / count);
+
+  // clamp heuristics
+  const ABS_MIN_H = 12;  // absolute minimal visible height
+  const MIN_H = 16;      // comfortable minimum (still small)
+  const MAX_H = 120;
+  let finalH = idealH;
+
+  if(finalH > MAX_H) finalH = MAX_H;
+  if(finalH < MIN_H){
+    // if ideal lower than MIN_H, we will lower to MIN_H if viewport allows by reducing top margin,
+    // else accept ABS_MIN_H to strictly ensure all buttons exist with no scroll.
+    if((MIN_H * count + totalGaps) <= usable){
+      finalH = MIN_H;
+    } else {
+      finalH = Math.max(ABS_MIN_H, Math.floor((usable - totalGaps) / count));
+      if(finalH < ABS_MIN_H) finalH = ABS_MIN_H;
+    }
+  }
+
+  // Compute font-size proportional to finalH, clamp min font-size 10
+  const fontSize = Math.max(10, Math.floor(finalH * 0.45));
+
+  // Now set bar top position just below the header, and set height = usable area + padding
+  // Position alphaBar to start below header; use exact top value and set bottom offset
+  const topPos = Math.max( (headerBottom + topMargin), 6 );
+  alphaBar.style.top = topPos + 'px';
+  // set alphaBar height to usable area (so it visually fits the space)
+  alphaBar.style.height = (usable) + 'px';
+
+  // apply sizes
+  buttons.forEach(btn=>{
+    btn.style.height = finalH + 'px';
+    btn.style.lineHeight = finalH + 'px';
+    btn.style.fontSize = fontSize + 'px';
+    btn.style.padding = '0';
+    btn.style.margin = '0';
+    btn.style.boxSizing = 'border-box';
+  });
+
+  // ensure no scroll - user specifically requested no scrolling alphabet
+  alphaBar.style.overflowY = 'hidden';
+}
+
+/* ---------- alpha filter logic (including N and #) ---------- */
+async function doAlphaFilter(letter){
+  cancelRender();
+  searchInput.value = '';
+  if(!letter){ resetToAll(); return; }
+
+  let matches = [];
+  if(letter === 'N'){
+    matches = channels.filter(c => {
+      const nm = (c.name||'').toString().trim();
+      return !!nm && /^[0-9]/.test(nm);
+    });
+  } else if(letter === '#'){
+    matches = channels.filter(c => {
+      const nm = (c.name||'').toString().trim();
+      if(!nm) return false;
+      const fc = nm.charAt(0);
+      return !(/[A-Za-z0-9\u00C0-\u024F\u0B80-\u0BFF]/).test(fc);
+    });
+  } else {
+    matches = channels.filter(c => {
+      const name = (c.name||'').toString();
+      if(!name) return false;
+      const ch = firstMeaningfulChar(name);
+      if(!ch) return false;
+      return ch.toUpperCase() === letter.toUpperCase();
+    });
+  }
+
+  document.querySelectorAll('.langSection').forEach(s=> s.style.display='none');
+  searchCount.textContent = matches.length + ' matches';
+
+  // ensure alphabet fits again (viewport could have changed)
+  fitAlphaButtonsViewport();
+
+  progress.style.display = matches.length ? 'block' : 'none';
+  progress.textContent = `Loading 0 / ${matches.length}`;
+  await renderMatchesInChunks(matches, searchGrid, (done,total)=> { progress.textContent = `Loading ${done} / ${total}`; });
+  progress.style.display = 'none';
+  updateCount();
+}
+
+/* ---------- streams & player (unchanged) ---------- */
+async function loadStreamsOnce(){ if(streamsLoadPromise) return streamsLoadPromise; streamsLoadPromise = (async ()=>{ const r = await fetch(STREAMS_URL); if(!r.ok) throw new Error('streams.json load failed '+r.status); streams = await r.json(); streamsLoadedFlag=true; })(); return streamsLoadPromise; }
+function findStreamForChannel(channelId){ if(!streamsLoadedFlag) return null; const cand = streams.filter(s => s.channel === channelId); if(!cand.length) return null; const hls = cand.find(s => /\.m3u8($|\?)/i.test(s.url)); if(hls) return hls; const mp4 = cand.find(s => /\.(mp4|webm)($|\?)/i.test(s.url)); if(mp4) return mp4; return cand[0]; }
+let currentMpegts=null, currentHls=null;
+function destroyPlayers(videoEl){ try{ if(currentHls){ currentHls.destroy(); currentHls=null; } }catch(e){} try{ if(currentMpegts){ currentMpegts.destroy(); currentMpegts=null; } }catch(e){} try{ if(videoEl){ videoEl.pause(); videoEl.removeAttribute('src'); videoEl.load(); } }catch(e){} }
+async function closeModal(){ const modal=document.getElementById('iptv-modal'); if(!modal) return; const video = modal.querySelector('video'); destroyPlayers(video); try{ if(document.fullscreenElement) await document.exitFullscreen(); }catch(e){} modalRoot.style.display='none'; modalRoot.innerHTML=''; document.body.style.overflow=''; }
+async function openPlayerForChannel(channelId){
+  try{ await loadStreamsOnce(); }catch(e){}
+  const ch = channels.find(c=>c.id===channelId);
+  const streamMeta = findStreamForChannel(channelId);
+  if(!streamMeta){
+    modalRoot.style.display='block'; modalRoot.innerHTML = `<div id="iptv-modal" class="modal-backdrop"><div class="modal"><div style="padding:18px;color:#e6f7ff"><div style="font-size:18px">${escapeHtml(ch?ch.name:channelId)}</div><div style="color:var(--muted);margin-top:8px">No stream entry found.</div><button class="closeBtn" id="closeBtn">×</button></div></div></div>`;
+    document.getElementById('closeBtn').addEventListener('click', closeModal); return;
+  }
+  modalRoot.style.display='block';
+  modalRoot.innerHTML = `<div id="iptv-modal" class="modal-backdrop" role="dialog" aria-modal="true"><div class="modal" role="document"><div class="player-wrap"><video id="iptv-video" controls playsinline webkit-playsinline></video></div><button class="closeBtn" id="closeBtn" aria-label="Close player">&times;</button></div></div>`;
+  document.body.style.overflow='hidden'; document.getElementById('closeBtn').addEventListener('click', closeModal);
+  try{ if(document.getElementById('iptv-modal').requestFullscreen) await document.getElementById('iptv-modal').requestFullscreen({navigationUI:'hide'}); } catch(e){}
+  const videoEl = document.getElementById('iptv-video');
+  async function attemptPlay(){
+    destroyPlayers(videoEl);
+    try{ videoEl.muted=false; }catch(e){}
+    const url = streamMeta.url;
+    if(/\.m3u8($|\?)/i.test(url)){
+      if(videoEl.canPlayType('application/vnd.apple.mpegurl')){ videoEl.src=url; try{ await videoEl.play(); }catch(e){} return; }
+      else if(window.Hls && Hls.isSupported()){ currentHls = new Hls(); currentHls.loadSource(url); currentHls.attachMedia(videoEl); currentHls.on(Hls.Events.MANIFEST_PARSED, async ()=>{ try{ await videoEl.play(); }catch(e){} }); currentHls.on(Hls.Events.ERROR, (_,d)=>console.error('hls error',d)); return; }
+    }
+    if(/\.(mp4|webm)($|\?)/i.test(url)){ videoEl.src=url; try{ await videoEl.play(); }catch(e){} return; }
+    if(window.mpegts && mpegts.isSupported()){ try{ currentMpegts = mpegts.createPlayer({type:'mpegts', url:url, isLive:true, enableStashBuffer:false}); currentMpegts.attachMediaElement(videoEl); currentMpegts.load(); try{ await currentMpegts.play(); }catch(e){} currentMpegts.on(mpegts.Events.ERROR,(t,d)=>console.error('mpegts err',t,d)); return; }catch(e){ console.error(e); } }
+    try{ videoEl.src = url; }catch(e){}
+  }
+  attemptPlay();
+}
+
+/* ---------- boot ---------- */
+(async function boot(){
+  try{ await loadChannels(); } catch(e){ console.error('loadChannels failed', e); alert('Failed to load channels.json: '+(e&&e.message)); return; }
+  progressiveRenderLanguages();
+  buildAlphaBar();
+  // ensure fit after layout settles
+  setTimeout(()=> fitAlphaButtonsViewport(), 120);
+  // re-fit on resize/orientation change
+  window.addEventListener('resize', debounce(()=> fitAlphaButtonsViewport(), 120));
+  window.addEventListener('orientationchange', ()=> setTimeout(fitAlphaButtonsViewport, 140));
+  setTimeout(updateCount, 600);
+  // search wiring
+  btnGo.addEventListener('click', ()=> doSearch(searchInput.value));
+  searchInput.addEventListener('keydown', e=>{ if(e.key === 'Enter'){ e.preventDefault(); doSearch(searchInput.value); }});
+  searchInput.addEventListener('input', debounce(e=> doSearch(e.target.value), 220));
+})();
+</script>
+</body>
+</html>
