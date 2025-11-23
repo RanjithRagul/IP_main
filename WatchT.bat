@@ -21,6 +21,7 @@ if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" (
 )
 
 :: Launch with MIXED CONTENT allowed
-start "" %CHROME% --user-data-dir="C:\ChromeTV_Temp_Fixed" --disable-web-security --allow-running-insecure-content --no-first-run "C:\zMain\main.html"
+start "" %CHROME% --user-data-dir="C:\ChromeTV_Temp_Fixed" --disable-web-security --allow-running-insecure-content --no-first-run "C:\IP_main\main.html"
+
 
 exit
